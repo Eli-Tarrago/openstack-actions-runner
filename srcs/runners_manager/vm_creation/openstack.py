@@ -1,12 +1,17 @@
 import logging
+import resource
+from sqlite3 import connect
 import time
 import asyncio
+import yaml
 
 import keystoneauth1.session
 import keystoneclient.auth.identity.v3
+import openstack
 import neutronclient.v2_0.client
 import novaclient.client
 import novaclient.v2.servers
+
 from jinja2 import FileSystemLoader, Environment
 
 from runners_manager.runner.Runner import Runner
@@ -16,47 +21,51 @@ from runners_manager.monitoring.prometheus import metrics
 logger = logging.getLogger("runner_manager")
 
 
-keystone_endpoint = 'https://scality.cloud/keystone/v3'
-
-
 class OpenstackManager(object):
-    nova_client: novaclient.client.Client
-    neutron: neutronclient.v2_0.client.Client
+
 
     redhat_username = ""
     redhat_password = ""
 
-    def __init__(self, project_name, token, username, password, region, redhat_username,
-                 redhat_password, ssh_keys):
-        if username and password:
-            logger.info("Openstack auth with basic credentials")
-            session = keystoneauth1.session.Session(
-                auth=keystoneclient.auth.identity.v3.Password(
-                    auth_url=keystone_endpoint,
-                    username=username,
-                    password=password,
-                    user_domain_name='default',
-                    project_name=project_name,
-                    project_domain_id='default')
-            )
-        else:
-            logger.info("Openstack auth with token")
-            session = keystoneauth1.session.Session(
-                auth=keystoneclient.auth.identity.v3.Token(
-                    auth_url=keystone_endpoint,
-                    token=token,
-                    project_name=project_name,
-                    project_domain_id='default')
-            )
+    def __init_(self):
+        pass
 
-        self.redhat_username = redhat_username
-        self.redhat_password = redhat_password
-        self.nova_client = novaclient.client.Client(version=2, session=session, region_name=region)
-        self.neutron = neutronclient.v2_0.client.Client(session=session, region_name=region)
-        self.ssh_keys = ssh_keys
+    def _get_resource_value(resource_key, default, filename = "config.yml"):
+        with open(filename, "r") as file:
+            openstack_opts = yaml.safe_load(file)
+        if openstack_opts['openstack'][resource_key]:
+            return openstack_opts['openstack'][resource_key]
+        else:
+            return default
+
+    def create_connection_from_config(self) -> Connection:
+        """_summary_
+
+        Args:
+            filename (str, optional): _description_. Defaults to "config.yml".
+
+        Returns:
+            _type_: _description_
+        """
+        return openstack.connect(
+            auth_url=self._get_resource_value("auth_url", None),
+            project_name=self._get_resource_value("project_name", None),
+            username=self._get_resource_value("username", None),
+            password=self._get_resource_value("password", None),
+            region_name=self._get_resource_value("region_name", None),
+            user_domain_name=self._get_resource_value("user_domain_name", "default"),
+            project_domain_name=self._get_resource_value("project_domain_name", None),
+            app_name=self._get_resource_value("app_name", None),
+            app_version=self._get_resource_value("app_version", "1.0"),
+            )
 
     def script_init_runner(self, runner: Runner, token: int,
                            github_organization: str, installer: str):
+
+        session = self.create_connection_from_config()
+        self.nova_client = novaclient.client.Client(version=2, session=session)
+        self.neutron = neutronclient.v2_0.client.Client(session=session)
+
         file_loader = FileSystemLoader('templates')
         env = Environment(loader=file_loader)
         env.trim_blocks = True
